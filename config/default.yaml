@@ -1,0 +1,48 @@
+model:
+  dimension: 27                       # Dimensionality of the problem.
+  num_hidden_layers: 5                # Number of hidden layers in the emulation model.
+  neurons: 1024                       # Number of neurons per hidden layer.
+  activation: custom_tanh             # Activation function: choose "relu", "custom_tanh", "alsing", etc.
+  use_gaussian_decomposition: True    # Whether to use the Gaussian decomposition layer.
+  learning_rate: 0.0001               # Learning rate for training the model.
+
+data:
+  num_samples: 1000                   # Number of samples for training. This now also determines the initial sample size.
+  sampling_strategy: ellipsoid        # Options: "gaussian" or "ellipsoid".
+  offset_scale: 5.0                   # Scale factor for random offset in ellipsoid sampling.
+  nstd: 3.0                           # Number of standard deviations for the bounding box.
+  cov_scale: 3.0                      # Covariance scaling factor for ellipsoid sampling.
+
+training:
+  epochs: 500                         # Maximum number of epochs.
+  batch_size: 128                     # Training batch size.
+  val_split: 0.1                      # Fraction of training data for validation.
+  patience: 75                        # Patience for early stopping.
+
+mcmc:
+  n_steps: 100000                     # Total MCMC steps.
+  temperature: 1.0                    # Temperature for acceptance probability.
+  base_cov: target                    # Either "target" or provide another covariance matrix.
+  adapt_interval: 50                  # Interval for adapting the jump scale.
+  cov_update_interval: 50             # Interval for updating the proposal covariance.
+  epsilon: 1e-6                       # Small constant for numerical stability.
+  burn_in_fraction: 0.1               # Fraction of samples to discard as burn-in.
+
+iterative:
+  n_iterations: 30                    # Total number of iterative cycles.
+  new_sample_size: 1000               # Number of new training samples to draw per iteration.
+  final_temperature: 1                # Temperature for the final MCMC iteration.
+  retention:
+    base_probability: 1.0             # Retention probability for samples with age <= 1.
+    decay_rate: 0.1                   # Linear decay rate per iteration beyond age 1.
+    min_probability: 0.5              # Minimum retention probability.
+  sampling_strategy: flat             # Iterative sampling strategy: "flat" (current) or "random".
+
+misc:
+  random_seed: 28                     # Random seed for reproducibility.
+
+paths:
+  trained_models: trained_models      # Directory for saving trained models.
+  iterative_data: iterative_data      # Directory for storing iterative data.
+  mcmc_chains: mcmc/chains            # Directory for saving MCMC chains.
+  mcmc_bestfit: mcmc/bestfit          # Directory for saving best-fit samples.

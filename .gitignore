@@ -1,0 +1,8 @@
+iterative_data/
+mcmc/bestfit/
+mcmc/chains/
+old/
+plots/
+trained_models/
+jobscript.sh
+__pycache__/

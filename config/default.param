@@ -1,0 +1,41 @@
+# config/default.param
+[misc]
+random_seed = 28
+
+[model]
+dimension = 27
+num_hidden_layers = 5
+neurons = 1024
+activation = custom_tanh
+use_gaussian_decomposition = True
+learning_rate = 0.0001
+
+[training]
+epochs = 500
+batch_size = 128
+val_split = 0.1
+patience = 75
+
+[data]
+num_samples = 500
+sampling_strategy = ellipsoid
+offset_scale = 5
+nstd = 3.0
+cov_scale = 3.0
+
+[mcmc]
+n_steps = 500000
+temperature = 1.0
+base_cov = target
+adapt_interval = 50
+cov_update_interval = 50
+epsilon = 1e-6
+burn_in_fraction = 0.1
+chain_filename = mcmc_chain.txt
+bestfit_filename = mcmc_best.txt
+
+[iterative]
+n_iterations = 30
+initial_sample_size = 1000
+new_sample_size = 1000
+final_temperature = 1.0
