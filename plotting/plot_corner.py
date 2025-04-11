@@ -152,14 +152,11 @@ if __name__ == "__main__":
     np.random.seed(int(config['misc']['random_seed']))
     tf.random.set_seed(int(config['misc']['random_seed']))
     
-    # Read configuration.
-    config = configparser.ConfigParser()
-    config_path = os.path.join("config", "default.param")
-    config.read(config_path)
+    # Get the number of parameters (dimension).
     N = int(config['model']['dimension'])
     
     # Load the compressed chain and best-fit file.
-    iter = 30
+    iter = 28
     chain_file = f"mcmc/chains/chain_iter{iter}.txt"
     bestfit_file = f"mcmc/bestfit/best_iter{iter}.txt"
     

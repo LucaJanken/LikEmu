@@ -2,6 +2,7 @@ iterative_data/
 mcmc/bestfit/
 mcmc/chains/
 old/
+logs/
 plots/
 trained_models/
 jobscript.sh

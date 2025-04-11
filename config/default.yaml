@@ -20,22 +20,25 @@ training:
   patience: 75                        # Patience for early stopping.
 
 mcmc:
-  n_steps: 100000                     # Total MCMC steps.
+  n_steps: 25000                      # Total MCMC steps.
   temperature: 1.0                    # Temperature for acceptance probability.
   base_cov: target                    # Either "target" or provide another covariance matrix.
   adapt_interval: 50                  # Interval for adapting the jump scale.
   cov_update_interval: 50             # Interval for updating the proposal covariance.
   epsilon: 1e-6                       # Small constant for numerical stability.
   burn_in_fraction: 0.1               # Fraction of samples to discard as burn-in.
+  step_increment: 25000               # Increment of MCMC steps for each iteration.
 
 iterative:
   n_iterations: 30                    # Total number of iterative cycles.
-  new_sample_size: 1000               # Number of new training samples to draw per iteration.
+  new_sample_size: 500               # Initial number of new training samples drawn in the first iteration.
+  sample_size_increment: 100          # Increment to add to the new sample size at each iteration.
   final_temperature: 1                # Temperature for the final MCMC iteration.
   retention:
     base_probability: 1.0             # Retention probability for samples with age <= 1.
-    decay_rate: 0.1                   # Linear decay rate per iteration beyond age 1.
+    decay_rate: 0.1                  # Linear decay rate per iteration beyond age 1.
     min_probability: 0.5              # Minimum retention probability.
+    control_coef: 1.0                 # Coefficient to control influence of birth iteration (set to 0 for no dynamic decay rate).
   sampling_strategy: flat             # Iterative sampling strategy: "flat" (current) or "random".
 
 misc:

@@ -9,7 +9,7 @@ The workflow includes:
   - Running an adaptive Metropolis-Hastings MCMC sampler using the surrogate model.
   - Resampling new training points from MCMC chains and aggregating them.
   - Saving trained models, aggregated training sets, and scalers for later use.
-Dependencies include numpy, tensorflow, scikit-learn, and custom modules for likelihoods, data generation,
+Dependencies include numpy, tensorflow, scikit-learn, matplotlib, and custom modules for likelihoods, data generation,
 model building, training, and MCMC sampling.
 """
 
@@ -18,6 +18,7 @@ import pickle
 import numpy as np
 import yaml
 import tensorflow as tf
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from likelihoods.gaussian import GaussianLikelihood
 from data.data_generator import generate_data
@@ -47,15 +48,17 @@ def resample_chain_points(chain_file, new_sample_size, temperature, strategy="fl
         raise ValueError("Unknown sampling strategy: " + strategy)
     return samples[indices]
 
-def retention_probability(ages, base_probability, decay_rate, min_probability):
+def retention_probability(ages, sample_iters, current_iter, base_probability, decay_rate, min_probability, control_coef):
     """
-    Compute retention probability as a function of sample age.
+    Compute retention probability as a function of sample age and birth iteration.
     For age <= 1, retention probability = base_probability.
-    For age > 1, use a linear decay with a minimum retention probability of min_probability.
+    For age > 1, a sample's retention probability decays linearly, but the decay is scaled by a control coefficient
+    that reduces the effective decay for samples born in later iterations.
     """
+    effective_decay = decay_rate * (1 - control_coef * (sample_iters / current_iter))
     ret_probs = np.where(ages <= 1,
                          base_probability,
-                         np.maximum(min_probability, base_probability - decay_rate * (ages - 1)))
+                         np.maximum(min_probability, base_probability - effective_decay * (ages - 1)))
     return ret_probs
 
 # Load configuration.
@@ -66,6 +69,13 @@ with open(config_path, "r") as f:
 n_iterations = int(config['iterative']['n_iterations'])
 num_samples = int(config['data']['num_samples'])
 new_sample_size = int(config['iterative']['new_sample_size'])
+
+# Read sample size increment (for new samples each iteration)
+sample_size_increment = int(config['iterative'].get('sample_size_increment', 0))
+
+# Read MCMC step size increment from config (default 0 if not provided)
+base_mcmc_steps = int(config['mcmc']['n_steps'])
+mcmc_step_increment = int(config['mcmc'].get('step_increment', 0))
 
 np.random.seed(int(config['misc']['random_seed']))
 tf.random.set_seed(int(config['misc']['random_seed']))
@@ -111,6 +121,7 @@ mcmc_bestfit_dir = config['paths']['mcmc_bestfit']
 ret_base = float(config['iterative']['retention']['base_probability'])
 ret_decay = float(config['iterative']['retention']['decay_rate'])
 ret_min = float(config['iterative']['retention']['min_probability'])
+control_coef = float(config['iterative']['retention']['control_coef'])
 
 # Determine the resampling strategy ("flat" for weighted, "random" for uniform random).
 resample_strategy = config['iterative']['sampling_strategy']
@@ -120,7 +131,7 @@ for it in range(1, n_iterations + 1):
     
     # Apply retention to the aggregated samples.
     ages = it - sample_iters
-    ret_probs = retention_probability(ages, ret_base, ret_decay, ret_min)
+    ret_probs = retention_probability(ages, sample_iters, it, ret_base, ret_decay, ret_min, control_coef)
     mask = np.random.rand(len(sample_iters)) < ret_probs
     aggregated_X = aggregated_X[mask]
     aggregated_y = aggregated_y[mask]
@@ -155,6 +166,9 @@ for it in range(1, n_iterations + 1):
     model_path = os.path.join(trained_models_dir, f"model_iter{it}.h5")
     model.save(model_path)
     
+    # Compute the current MCMC step count.
+    current_mcmc_steps = base_mcmc_steps + (it - 1) * mcmc_step_increment
+
     # Set the MCMC temperature.
     current_temp = (float(config['iterative']['final_temperature'])
                     if it == n_iterations else float(config['mcmc']['temperature']))
@@ -169,7 +183,7 @@ for it in range(1, n_iterations + 1):
     adaptive_metropolis_hastings(
         keras_model=model,
         initial_point=initial_point,
-        n_steps=int(config['mcmc']['n_steps']),
+        n_steps=current_mcmc_steps,
         temperature=current_temp,
         base_cov=base_cov,
         scaler_x=scaler_x_current,
@@ -182,8 +196,11 @@ for it in range(1, n_iterations + 1):
         burn_in_fraction=float(config['mcmc']['burn_in_fraction'])
     )
     
+    # Compute the dynamic sample size for this iteration.
+    current_new_samples = new_sample_size + (it - 1) * sample_size_increment
+    
     # Resample new training points using the specified strategy.
-    new_X = resample_chain_points(chain_file, new_sample_size, temperature=current_temp, strategy=resample_strategy)
+    new_X = resample_chain_points(chain_file, current_new_samples, temperature=current_temp, strategy=resample_strategy)
     new_y = target_likelihood.neg_loglike(new_X)
     new_sample_iters = np.full(new_X.shape[0], it, dtype=int)
     
@@ -192,7 +209,7 @@ for it in range(1, n_iterations + 1):
     sample_iters = np.concatenate([sample_iters, new_sample_iters])
     
     training_sets.append((aggregated_X, aggregated_y))
-
+    
 os.makedirs(iterative_data_dir, exist_ok=True)
 with open(os.path.join(iterative_data_dir, "training_sets.pkl"), "wb") as f:
     pickle.dump(training_sets, f)
