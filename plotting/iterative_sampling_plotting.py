@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import pickle
 import yaml
 from likelihoods.gaussian import GaussianLikelihood
+from likelihoods.planck_gaussian import PlanckGaussianLikelihood
 from plotting.plot_utils import compute_levels
 
 def plot_iterative_sampling(training_sets, analytic_mu, analytic_cov,
@@ -33,7 +34,7 @@ def plot_iterative_sampling(training_sets, analytic_mu, analytic_cov,
     n_iterations = len(training_sets)
     
     # Generate analytic samples for the reference contours.
-    analytic_samples = np.random.multivariate_normal(analytic_mu, analytic_cov, size=100000)
+    analytic_samples = np.random.multivariate_normal(analytic_mu, 3*analytic_cov, size=1000000)
     analytic_samples_2d = analytic_samples[:, :2]
     
     bins = 50
@@ -69,7 +70,7 @@ def plot_iterative_sampling(training_sets, analytic_mu, analytic_cov,
                        colors='green', linestyles=ls, linewidths=2, zorder=2)
         
         # Create scatter plot without rasterization flag first.
-        sc = ax.scatter(samples_2d[:, 0], samples_2d[:, 1], color='blue', s=10, alpha=0.6, 
+        sc = ax.scatter(samples_2d[:, 0], samples_2d[:, 1], color='blue', s=2, alpha=0.6, 
                    label='Training Samples')
         # Rasterize the scatter plot for better rendering.
         sc.set_rasterized(True)
@@ -102,7 +103,18 @@ if __name__ == '__main__':
     np.random.seed(int(config['misc']['random_seed']))
 
     target_likelihood = GaussianLikelihood(N)
-    analytic_mu = np.zeros(N)
+    #'''
+    chains_dir = "class_chains/27_param"  # where your Planck .txt files live
+
+    # Instantiate the Planck‐based Gaussian likelihood
+    target_likelihood = PlanckGaussianLikelihood(
+        N=N,
+        chains_dir=chains_dir,
+        skip_rows=500,            # burn-in rows to skip (optional)
+        max_rows_per_file=None    # or an int if you only want a subset
+    )
+    #'''
+    analytic_mu = target_likelihood.mu
     analytic_cov = target_likelihood.Sigma
     param_names = [f"Param {i+1}" for i in range(N)]
     

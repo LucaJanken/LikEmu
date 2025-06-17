@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import yaml
 from likelihoods.gaussian import GaussianLikelihood
+from likelihoods.planck_gaussian import PlanckGaussianLikelihood
 from plotting.plot_utils import compute_levels
 
 def plot_iterative_chains(chain_data, analytic_mu, analytic_cov,
@@ -27,7 +28,7 @@ def plot_iterative_chains(chain_data, analytic_mu, analytic_cov,
     n_iterations = len(chain_data)
     
     # Generate analytic samples for the reference contours.
-    analytic_samples = np.random.multivariate_normal(analytic_mu, analytic_cov, size=100000)
+    analytic_samples = np.random.multivariate_normal(analytic_mu, 3*analytic_cov, size=1000000)
     analytic_samples_2d = analytic_samples[:, :2]
     
     bins = 50
@@ -48,7 +49,7 @@ def plot_iterative_chains(chain_data, analytic_mu, analytic_cov,
         
         # Extract the first two dimensions.
         chain_2d = samples[:, :2]
-        
+
         # Compute weighted 2D histogram.
         H_net, xedges_net, yedges_net = np.histogram2d(chain_2d[:, 0],
                                                        chain_2d[:, 1],
@@ -98,8 +99,19 @@ if __name__ == '__main__':
         else:
             print(f"{chain_file} not found.")
     
-    target_likelihood = GaussianLikelihood(N)
-    analytic_mu = np.zeros(N)
+    #target_likelihood = GaussianLikelihood(N)
+    #'''
+    chains_dir = "class_chains/27_param"  # where your Planck .txt files live
+
+    # Instantiate the Planck‐based Gaussian likelihood
+    target_likelihood = PlanckGaussianLikelihood(
+        N=N,
+        chains_dir=chains_dir,
+        skip_rows=500,            # burn-in rows to skip (optional)
+        max_rows_per_file=None    # or an int if you only want a subset
+    )
+    #'''
+    analytic_mu = target_likelihood.mu
     analytic_cov = target_likelihood.Sigma
     param_names = [f"Param {i+1}" for i in range(N)]
     

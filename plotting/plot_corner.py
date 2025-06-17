@@ -10,6 +10,7 @@ import yaml
 import matplotlib.pyplot as plt
 import configparser
 from likelihoods.gaussian import GaussianLikelihood
+from likelihoods.planck_gaussian import PlanckGaussianLikelihood
 
 def compute_levels(H, levels=[0.68, 0.95]):
     """
@@ -156,7 +157,7 @@ if __name__ == "__main__":
     N = int(config['model']['dimension'])
     
     # Load the compressed chain and best-fit file.
-    iter = 28
+    iter = 5
     chain_file = f"mcmc/chains/chain_iter{iter}.txt"
     bestfit_file = f"mcmc/bestfit/best_iter{iter}.txt"
     
@@ -172,11 +173,21 @@ if __name__ == "__main__":
     
     # Create the target likelihood to sample from the analytic Gaussian.
     # (Assumes that the likelihood's parameters are the same as during training.)
-    target_likelihood = GaussianLikelihood(N)
+    #target_likelihood = GaussianLikelihood(N)
+
+    chains_dir = "class_chains/27_param"  # where your Planck .txt files live
+
+    # Instantiate the Planck‐based Gaussian likelihood
+    target_likelihood = PlanckGaussianLikelihood(
+        N=N,
+        chains_dir=chains_dir,
+        skip_rows=500,            # burn-in rows to skip (optional)
+        max_rows_per_file=None    # or an int if you only want a subset
+    )
     
     # Sample from the analytic multivariate Gaussian.
     M_analytic = 1000000
-    analytic_samples = np.random.multivariate_normal(target_likelihood.mu, target_likelihood.Sigma, size=M_analytic)
+    analytic_samples = np.random.multivariate_normal(target_likelihood.mu, target_likelihood.Sigma * 3, size=M_analytic)
     
     # Parameter names (either from config or generic).
     param_names = [f"Param {i+1}" for i in range(N)]
