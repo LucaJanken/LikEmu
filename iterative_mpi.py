@@ -9,6 +9,12 @@ import os
 import sys
 import pickle
 import yaml
+
+try:
+    from pypolychord import PolyChordSettings, run_polychord
+except Exception:  # pragma: no cover - library may be missing
+    PolyChordSettings = None
+    run_polychord = None
 import numpy as np
 import tensorflow as tf
 from mpi4py import MPI
@@ -101,17 +107,34 @@ off = float(cfg['data']['offset_scale'])
 nstd = float(cfg['data']['nstd'])
 covs = float(cfg['data']['cov_scale'])
 
-nc = int(cfg['sampling']['mcmc']['n_chains'])
-r0 = float(cfg['sampling']['mcmc']['r_start'])
-r1 = float(cfg['sampling']['mcmc']['r_stop'])
-rc = float(cfg['sampling']['mcmc']['r_converged'])
-T0 = float(cfg['sampling']['mcmc']['initial_temperature'])
-TF = float(cfg['sampling']['mcmc']['final_temperature'])
-sched = cfg['sampling']['mcmc']['annealing_schedule']
-ai = int(cfg['sampling']['mcmc']['adapt_interval'])
-ci = int(cfg['sampling']['mcmc']['cov_update_interval'])
-eps = float(cfg['sampling']['mcmc']['epsilon'])
-max_steps = int(cfg['sampling']['mcmc']['max_steps'])
+sampler_method = cfg.get('sampling', {}).get('method', 'mcmc')
+
+if sampler_method == 'mcmc':
+    mc_cfg = cfg['sampling']['mcmc']
+    nc = int(mc_cfg['n_chains'])
+    r0 = float(mc_cfg['r_start'])
+    r1 = float(mc_cfg['r_stop'])
+    rc = float(mc_cfg['r_converged'])
+    T0 = float(mc_cfg['initial_temperature'])
+    TF = float(mc_cfg['final_temperature'])
+    sched = mc_cfg['annealing_schedule']
+    ai = int(mc_cfg['adapt_interval'])
+    ci = int(mc_cfg['cov_update_interval'])
+    eps = float(mc_cfg['epsilon'])
+    max_steps = int(mc_cfg['max_steps'])
+else:
+    pc_cfg = cfg['sampling']['polychord']
+    nc = int(pc_cfg.get('nprocs', size))
+    pc_nlive = int(pc_cfg.get('nlive', 500))
+    pc_num_repeats = int(pc_cfg.get('num_repeats', 1))
+    pc_prec = float(pc_cfg.get('precision_criterion', 0.01))
+    pc_feedback = int(pc_cfg.get('feedback', 1))
+    pc_out = pc_cfg.get('output_dir', 'polychord_output')
+    pc_mpi = bool(pc_cfg.get('mpi', True))
+    T0 = float(cfg['sampling']['mcmc']['initial_temperature'])
+    TF = float(cfg['sampling']['mcmc']['final_temperature'])
+    sched = cfg['sampling']['mcmc']['annealing_schedule']
+    ai = ci = eps = max_steps = r0 = r1 = rc = None
 
 paths = cfg['paths']
 dirs = {
@@ -124,7 +147,7 @@ dirs = {
 # Check MPI size
 if size != nc:
     if rank == 0:
-        raise RuntimeError(f"MPI size {size} != n_chains {nc}")
+        raise RuntimeError(f"MPI size {size} != required processes {nc}")
     sys.exit(1)
 
 # Seeds per rank
@@ -158,27 +181,30 @@ tl = LikelihoodClass(**ctor_args)
 N = tl.N
 
 # Base covariance
-bcs = cfg['sampling']['mcmc']['base_cov']
-if bcs == 'target':
-    base_cov = tl.Sigma
-elif bcs == 'identity':
-    base_cov = np.eye(N)
-elif bcs == 'empirical':
-    if rank == 0:
-        X0s, _, sx0, _ = generate_data(
-            tl, num_samples=n0,
-            sampling_strategy=init_str,
-            offset_scale=off, nstd=nstd, cov_scale=covs
-        )
-        X0 = sx0.inverse_transform(X0s)
-        local = np.cov(X0, rowvar=False)
+if sampler_method == 'mcmc':
+    bcs = cfg['sampling']['mcmc']['base_cov']
+    if bcs == 'target':
+        base_cov = tl.Sigma
+    elif bcs == 'identity':
+        base_cov = np.eye(N)
+    elif bcs == 'empirical':
+        if rank == 0:
+            X0s, _, sx0, _ = generate_data(
+                tl, num_samples=n0,
+                sampling_strategy=init_str,
+                offset_scale=off, nstd=nstd, cov_scale=covs
+            )
+            X0 = sx0.inverse_transform(X0s)
+            local = np.cov(X0, rowvar=False)
+        else:
+            local = None
+        base_cov = comm.bcast(local, root=0)
     else:
-        local = None
-    base_cov = comm.bcast(local, root=0)
+        if rank == 0:
+            raise ValueError(f"Unknown base_cov {bcs}")
+        sys.exit(1)
 else:
-    if rank == 0:
-        raise ValueError(f"Unknown base_cov {bcs}")
-    sys.exit(1)
+    base_cov = None
 
 # Initial data on rank 0, now with chain_ids
 if rank == 0:
@@ -279,57 +305,111 @@ for it in range(1, n_iter + 1):
 
     temp = compute_temperature(it, n_iter, T0, TF, sched)
 
-    # broadcast initial points
-    if rank == 0:
-        pts = np.random.uniform(lb, ub, size=(nc, N))
-    else:
-        pts = None
-    pts = comm.bcast(pts, root=0)
+    if sampler_method == 'mcmc':
+        # broadcast initial points
+        if rank == 0:
+            pts = np.random.uniform(lb, ub, size=(nc, N))
+        else:
+            pts = None
+        pts = comm.bcast(pts, root=0)
 
-    # run one chain per rank
-    local_chain, local_cov = adaptive_metropolis_hastings_mpi(
-        keras_model=model,
-        init_pt=pts[rank].reshape(1, -1),
-        temperature=temp,
-        base_cov=base_cov,
-        scaler_x=sx,
-        scaler_y=sy,
-        adapt_interval=ai,
-        cov_update_interval=ci,
-        epsilon=eps,
-        r_start=r0,
-        r_stop=r1,
-        r_converged=rc,
-        max_steps=max_steps,
-        rank=rank
-    )
-
-    all_ch = comm.gather(local_chain, root=0)
-    all_cov = comm.gather(local_cov, root=0)
-
-    if rank == 0:
-        # label each row with its chain id
-        labeled = []
-        for r, ch in enumerate(all_ch):
-            cid_col = np.full((ch.shape[0], 1), r, dtype=int)
-            labeled.append(np.hstack((ch, cid_col)))
-        combined = np.vstack(labeled)
-
-        # save raw chains
-        os.makedirs(dirs['mcmc_chains'], exist_ok=True)
-        np.savetxt(
-            os.path.join(dirs['mcmc_chains'], f"chain_iter{it}.txt"),
-            combined
+        local_chain, local_cov = adaptive_metropolis_hastings_mpi(
+            keras_model=model,
+            init_pt=pts[rank].reshape(1, -1),
+            temperature=temp,
+            base_cov=base_cov,
+            scaler_x=sx,
+            scaler_y=sy,
+            adapt_interval=ai,
+            cov_update_interval=ci,
+            epsilon=eps,
+            r_start=r0,
+            r_stop=r1,
+            r_converged=rc,
+            max_steps=max_steps,
+            rank=rank
         )
 
-        # resample
-        new_n = n0 + (it - 1) * inc
-        newX, new_chain_ids = resample_chain_points(
-            combined, new_n, temp, strategy=it_str
-        )
-        newY = tl.neg_loglike(newX)
+        all_ch = comm.gather(local_chain, root=0)
+        all_cov = comm.gather(local_cov, root=0)
+
+        if rank == 0:
+            labeled = []
+            for r, ch in enumerate(all_ch):
+                cid_col = np.full((ch.shape[0], 1), r, dtype=int)
+                labeled.append(np.hstack((ch, cid_col)))
+            combined = np.vstack(labeled)
+
+            os.makedirs(dirs['mcmc_chains'], exist_ok=True)
+            np.savetxt(
+                os.path.join(dirs['mcmc_chains'], f"chain_iter{it}.txt"),
+                combined
+            )
+
+            new_n = n0 + (it - 1) * inc
+            newX, new_chain_ids = resample_chain_points(
+                combined, new_n, temp, strategy=it_str
+            )
+            newY = tl.neg_loglike(newX)
+        else:
+            newX = newY = new_chain_ids = None
     else:
-        newX = newY = new_chain_ids = None
+        if PolyChordSettings is None or run_polychord is None:
+            raise ImportError('pypolychord is required for PolyChord sampling')
+
+        settings = PolyChordSettings(N, 0)
+        settings.nlive = pc_nlive
+        settings.num_repeats = pc_num_repeats
+        settings.precision_criterion = pc_prec
+        settings.feedback = pc_feedback
+        settings.base_dir = pc_out
+        settings.file_root = f"iter{it}"
+
+        if rank == 0:
+            os.makedirs(settings.base_dir, exist_ok=True)
+
+        def loglike_fn(theta):
+            x = np.asarray(theta)
+            xstd = (x - model.sxm) / model.sxs
+            ystd = model(xstd.reshape(1, -1), training=False)
+            nll = ystd.numpy().item() * model.sys + model.sym
+            return -nll, []
+
+        run_polychord(
+            loglike_fn,
+            N,
+            0,
+            settings,
+            lambda u: lb + (ub - lb) * np.asarray(u)
+        )
+
+        if rank == 0:
+            chain_file = os.path.join(settings.base_dir, settings.file_root + '.txt')
+            pc_chain = np.loadtxt(chain_file)
+            weight = pc_chain[:, 0]
+            neg_ll = 0.5 * pc_chain[:, 1]
+            samples = pc_chain[:, 2:]
+            cid = np.zeros(len(samples), dtype=int)
+            combined = np.hstack([
+                weight.reshape(-1, 1),
+                neg_ll.reshape(-1, 1),
+                samples,
+                cid.reshape(-1, 1)
+            ])
+
+            os.makedirs(dirs['mcmc_chains'], exist_ok=True)
+            np.savetxt(
+                os.path.join(dirs['mcmc_chains'], f"chain_iter{it}.txt"),
+                combined
+            )
+
+            new_n = n0 + (it - 1) * inc
+            newX, new_chain_ids = resample_chain_points(
+                combined, new_n, temp, strategy=it_str
+            )
+            newY = tl.neg_loglike(newX)
+        else:
+            newX = newY = new_chain_ids = None
 
     # broadcast new draws
     newX = comm.bcast(newX, root=0)
@@ -347,9 +427,10 @@ for it in range(1, n_iter + 1):
         with open(os.path.join(dirs['iterative_data'], "training_sets.pkl"), 'wb') as f:
             pickle.dump(training_sets, f)
 
-        # update base_cov
-        base_cov = sum(all_cov) / len(all_cov)
-    base_cov = comm.bcast(base_cov, root=0)
+        if sampler_method == 'mcmc':
+            base_cov = sum(all_cov) / len(all_cov)
+    if sampler_method == 'mcmc':
+        base_cov = comm.bcast(base_cov, root=0)
 
 if rank == 0:
     print("All iterations complete.")
