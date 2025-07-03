@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import configparser
 from likelihoods.gaussian import GaussianLikelihood
 from likelihoods.planck_gaussian import PlanckGaussianLikelihood
+from likelihoods.planck_gaussian_extended import ExtendedPlanckGaussianLikelihood
 
 def compute_levels(H, levels=[0.68, 0.95]):
     """
@@ -157,7 +158,7 @@ if __name__ == "__main__":
     N = int(config['model']['dimension'])
     
     # Load the compressed chain and best-fit file.
-    iter = 5
+    iter = 1
     chain_file = f"mcmc/chains/chain_iter{iter}.txt"
     bestfit_file = f"mcmc/bestfit/best_iter{iter}.txt"
     

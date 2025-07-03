@@ -11,110 +11,112 @@ from likelihoods.gaussian import GaussianLikelihood
 from likelihoods.planck_gaussian import PlanckGaussianLikelihood
 from plotting.plot_utils import compute_levels
 
-def plot_iterative_chains(chain_data, analytic_mu, analytic_cov,
-                          param_names=None, output_filename="plots/iterative_chain_plots.pdf"):
+def plot_iterative_chains(
+    chain_data,
+    analytic_mu,
+    analytic_cov,
+    param_names=None,
+    idx_pair=(0, 1),
+    output_filename="plots/iterative_chain_plots.pdf"
+):
     """
     Generate 2D credible interval plots for the MCMC chains of each iteration.
 
     Parameters:
-      chain_data: List of tuples, one per iteration. Each tuple is (samples, weights) where:
-                   - samples: array of shape (N_samples, D) containing the MCMC parameter samples.
-                   - weights: array of shape (N_samples,) with the multiplicity weights.
-      analytic_mu: Mean vector of the reference multivariate Gaussian.
-      analytic_cov: Covariance matrix of the reference distribution.
-      param_names: Optional list of two parameter names for labeling the x/y axes.
-      output_filename: File path to save the final figure (PDF).
+      chain_data: List of (samples, weights) per iteration
+      analytic_mu: Mean vector of the reference Gaussian
+      analytic_cov: Covariance matrix of the reference
+      param_names: List of parameter names
+      idx_pair: Tuple (i, j) of the two dimensions to plot
+      output_filename: Path for saving the PDF
     """
+    x_idx, y_idx = idx_pair
     n_iterations = len(chain_data)
-    
-    # Generate analytic samples for the reference contours.
-    analytic_samples = np.random.multivariate_normal(analytic_mu, 3*analytic_cov, size=1000000)
-    analytic_samples_2d = analytic_samples[:, :2]
-    
+
+    # Prepare analytic reference samples in chosen dims
+    analytic_samples = np.random.multivariate_normal(analytic_mu, 10 * analytic_cov, size=1_000_000)
+    ref2d = analytic_samples[:, [x_idx, y_idx]]
     bins = 50
-    H_ref, xedges_ref, yedges_ref = np.histogram2d(analytic_samples_2d[:, 0],
-                                                   analytic_samples_2d[:, 1],
-                                                   bins=bins, density=True)
-    X_ref = 0.5 * (xedges_ref[:-1] + xedges_ref[1:])
-    Y_ref = 0.5 * (yedges_ref[:-1] + yedges_ref[1:])
+    H_ref, xe_ref, ye_ref = np.histogram2d(ref2d[:,0], ref2d[:,1], bins=bins, density=True)
+    X_ref = 0.5 * (xe_ref[:-1] + xe_ref[1:])
+    Y_ref = 0.5 * (ye_ref[:-1] + ye_ref[1:])
     levels_ref = compute_levels(H_ref, levels=[0.68, 0.95])
-    
+
     fig, axes = plt.subplots(1, n_iterations, figsize=(5 * n_iterations, 5), squeeze=False)
-    
+
     if param_names is None:
-        param_names = ["Param 1", "Param 2"]
-    
+        param_names = [f"Param {i}" for i in (x_idx, y_idx)]
+
     for i, (samples, weights) in enumerate(chain_data):
         ax = axes[0, i]
-        
-        # Extract the first two dimensions.
-        chain_2d = samples[:, :2]
 
-        # Compute weighted 2D histogram.
-        H_net, xedges_net, yedges_net = np.histogram2d(chain_2d[:, 0],
-                                                       chain_2d[:, 1],
-                                                       bins=bins, density=True, weights=weights)
-        X_net = 0.5 * (xedges_net[:-1] + xedges_net[1:])
-        Y_net = 0.5 * (yedges_net[:-1] + yedges_net[1:])
+        # extract chosen dims
+        chain2d = samples[:, [x_idx, y_idx]]
+        H_net, xe_net, ye_net = np.histogram2d(
+            chain2d[:,0], chain2d[:,1],
+            bins=bins, density=True, weights=weights
+        )
+        X_net = 0.5 * (xe_net[:-1] + xe_net[1:])
+        Y_net = 0.5 * (ye_net[:-1] + ye_net[1:])
         levels_net = compute_levels(H_net, levels=[0.68, 0.95])
-        
-        # Plot analytic (reference) contours: green (68% solid, 95% dashed)
+
+        # reference contours (green)
         for lvl, ls in zip(levels_ref, ['solid', 'dashed']):
-            ax.contour(X_ref, Y_ref, H_ref.T, levels=[lvl], colors='green', linestyles=ls, linewidths=2)
-        
-        # Plot chain contours: blue (68% solid, 95% dashed)
+            ax.contour(X_ref, Y_ref, H_ref.T, levels=[lvl],
+                       colors='green', linestyles=ls, linewidths=2)
+
+        # chain contours (blue)
         for lvl, ls in zip(levels_net, ['solid', 'dashed']):
-            ax.contour(X_net, Y_net, H_net.T, levels=[lvl], colors='blue', linestyles=ls)
-        
-        ax.set_xlabel(param_names[0])
-        ax.set_ylabel(param_names[1])
+            ax.contour(X_net, Y_net, H_net.T, levels=[lvl],
+                       colors='blue', linestyles=ls)
+
+        ax.set_xlabel(param_names[x_idx])
+        ax.set_ylabel(param_names[y_idx])
         ax.set_title(f"Iteration {i+1}")
-    
+
     plt.tight_layout()
-    plt.savefig(output_filename, dpi = 300)
+    os.makedirs(os.path.dirname(output_filename), exist_ok=True)
+    plt.savefig(output_filename, dpi=300)
     plt.show()
 
+
 if __name__ == '__main__':
-    # Load configuration from YAML.
+    # load config
     config_path = os.path.join("config", "default.yaml")
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
     N = int(config['model']['dimension'])
     n_iterations = int(config['iterative']['n_iterations'])
-    
-    # Set random seed for reproducibility.
     np.random.seed(int(config['misc']['random_seed']))
-    
-    # Load MCMC chain samples from the chain files.
-    # Each chain file is expected to have columns:
-    # [multiplicity, -log(L), param_1, param_2, ..., param_D]
+
+    # load chains
     chain_data = []
     for it in range(1, n_iterations + 1):
-        chain_file = os.path.join("mcmc", "chains", f"chain_iter{it}.txt")
-        if os.path.exists(chain_file):
-            chain = np.loadtxt(chain_file, skiprows=1)
-            weights = chain[:, 0]      # Extract weights.
-            samples = chain[:, 2:]     # Extract parameter samples.
+        fname = os.path.join("mcmc", "chains", f"chain_iter{it}.txt")
+        if os.path.exists(fname):
+            data = np.loadtxt(fname)
+            weights = data[:, 0]
+            samples = data[:, 2:]
             chain_data.append((samples, weights))
         else:
-            print(f"{chain_file} not found.")
-    
-    #target_likelihood = GaussianLikelihood(N)
-    #'''
-    chains_dir = "class_chains/27_param"  # where your Planck .txt files live
+            print(f"{fname} not found.")
 
-    # Instantiate the Planck‐based Gaussian likelihood
-    target_likelihood = PlanckGaussianLikelihood(
+    # target likelihood
+    chains_dir = "class_chains/27_param"
+    target = PlanckGaussianLikelihood(
         N=N,
         chains_dir=chains_dir,
-        skip_rows=500,            # burn-in rows to skip (optional)
-        max_rows_per_file=None    # or an int if you only want a subset
+        skip_rows=500,
+        max_rows_per_file=None
     )
-    #'''
-    analytic_mu = target_likelihood.mu
-    analytic_cov = target_likelihood.Sigma
+
     param_names = [f"Param {i+1}" for i in range(N)]
-    
-    plot_iterative_chains(chain_data, analytic_mu, analytic_cov,
-                          param_names=param_names,
-                          output_filename="plots/iterative_chain_plots.pdf")
+    # e.g.
+    plot_iterative_chains(
+        chain_data,
+        analytic_mu=target.mu,
+        analytic_cov=target.Sigma,
+        param_names=param_names,
+        idx_pair=(27, 28),
+        output_filename="plots/iterative_chain_plots.pdf"
+    )

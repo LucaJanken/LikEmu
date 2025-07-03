@@ -25,8 +25,10 @@ from models.emulation_model import build_emulation_model
 from training.train import train_model
 from mcmc.sampler import adaptive_metropolis_hastings
 
-def resample_chain_points(chain_file, new_sample_size, temperature, strategy="flat"):
-    chain = np.loadtxt(chain_file, skiprows=0)
+def resample_chain_points(chain, new_sample_size, temperature, strategy="flat"):
+    """Resample points from a compressed chain array or filename."""
+    if isinstance(chain, str):
+        chain = np.loadtxt(chain, skiprows=0)
     samples = chain[:, 2:]
     n_available = len(samples)
 
@@ -104,15 +106,16 @@ offset_scale                = float(config['data']['offset_scale'])
 nstd                        = float(config['data']['nstd'])
 cov_scale                   = float(config['data']['cov_scale'])
 
-n_steps                     = int(config['mcmc']['n_steps'])
-n_steps_increment           = int(config['mcmc']['n_steps_increment'])
+n_chains                    = int(config['mcmc']['n_chains'])
+r_start                     = float(config['mcmc']['r_start'])
+r_stop                      = float(config['mcmc']['r_stop'])
+r_converged                 = float(config['mcmc']['r_converged'])
 initial_temperature         = float(config['mcmc']['initial_temperature'])
 final_temperature           = float(config['mcmc']['final_temperature'])
 annealing_schedule          = config['mcmc']['annealing_schedule']
 adapt_interval              = int(config['mcmc']['adapt_interval'])
 cov_update_interval         = int(config['mcmc']['cov_update_interval'])
 epsilon                     = float(config['mcmc']['epsilon'])
-burn_in_fraction            = float(config['mcmc']['burn_in_fraction'])
 
 trained_models_dir          = config['paths']['trained_models']
 iterative_data_dir          = config['paths']['iterative_data']
@@ -226,18 +229,22 @@ for it in range(1, n_iterations + 1):
         annealing_schedule
     )
     
-    initial_point = np.random.multivariate_normal(target_likelihood.mu, target_likelihood.Sigma)
-    print(initial_point)
+    initial_points = np.random.multivariate_normal(
+        target_likelihood.mu,
+        target_likelihood.Sigma,
+        size=n_chains
+    )
+    print(initial_points)
     
     os.makedirs(mcmc_chains_dir, exist_ok=True)
     os.makedirs(mcmc_bestfit_dir, exist_ok=True)
     chain_file   = os.path.join(mcmc_chains_dir,  f"chain_iter{it}.txt")
     bestfit_file = os.path.join(mcmc_bestfit_dir, f"best_iter{it}.txt")
 
-    base_cov = adaptive_metropolis_hastings(
+    chain_data, base_cov = adaptive_metropolis_hastings(
         keras_model=model,
-        initial_point=initial_point,
-        n_steps=n_steps,
+        initial_points=initial_points,
+        n_chains=n_chains,
         temperature=temp,
         base_cov=base_cov,
         scaler_x=scaler_x,
@@ -247,12 +254,13 @@ for it in range(1, n_iterations + 1):
         chain_file=chain_file,
         bestfit_file=bestfit_file,
         epsilon=epsilon,
-        burn_in_fraction=burn_in_fraction
+        r_start=r_start,
+        r_stop=r_stop,
+        r_converged=r_converged
     )
 
-    n_steps += n_steps_increment
-    new_size = initial_sample_size + (it-1)*sample_size_increment
-    new_X = resample_chain_points(chain_file, new_size, temp, strategy=iterative_sampling_strategy)
+    new_size = initial_sample_size + (it-1) * sample_size_increment
+    new_X = resample_chain_points(chain_data, new_size, temp, strategy=iterative_sampling_strategy)
     new_y = target_likelihood.neg_loglike(new_X)
     new_iters = np.full(new_X.shape[0], it, dtype=int)
 

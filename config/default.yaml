@@ -1,8 +1,12 @@
 misc:
   random_seed: 713                      # Random seed for reproducibility.
 
+likelihood:
+  type: planck_gaussian_extended        # “planck_gaussian” or “planck_gaussian_extended”
+  chains_dir: /home/lucajn/repos/LikEmu/class_chains/27_param # Directory containing the CLASS chains.
+
 model:
-  dimension: 27                         # Dimensionality of the problem.
+  dimension: 29                         # Dimensionality of the problem.
   num_hidden_layers: 5                  # Number of hidden layers in the emulation model.
   neurons: 1024                         # Number of neurons per hidden layer.
   activation: alsing                    # Activation function: choose "relu", "custom_tanh", "alsing", etc.
@@ -10,44 +14,57 @@ model:
   learning_rate: 0.0001                 # Learning rate for training the model.
 
 training:
-  epochs: 500                           # Maximum number of epochs.
+  epochs: 1000                          # Maximum number of epochs.
   batch_size: 128                       # Training batch size.
   val_split: 0.1                        # Fraction of training data for validation.
   patience: 75                          # Patience for early stopping.
 
 data:
-  scaler: standard                      # Scaler for input data: "standard" or "minmax"
-  initial_sample_size: 5000             # Initial sample size for training.
-  sample_size_increment: 0              # Increment to add to the sample size at each iteration.
+  scaler: standard                      # Scaler for input data: "standard" or "minmax".
+  initial_sample_size: 1000             # Initial sample size for training.
+  sample_size_increment: 0              # Increment to add to the sample size each iteration.
   initial_sampling_strategy: lhs        # Options: "gaussian", "ellipsoid" or "lhs".
   iterative_sampling_strategy: flat     # Options: "flat" or "random".
   offset_scale: 3.0                     # Scale factor for random offset in ellipsoid sampling.
-  nstd: 10.0                            # Number of standard deviations that define the bounding box for ellipsoid sampling.
-  cov_scale: 6.0                        # Covariance scaling factor for ellipsoid sampling (size of point cloud).
-
-mcmc:
-  n_steps: 1000000                      # Number of MCMC steps.
-  n_steps_increment: 0                  # Increment for the number of steps in MCMC at each iteration.
-  initial_temperature: 3.0              # Temperature for the initial mcmc run.
-  final_temperature: 3.0                # Temperature for the final iteration.
-  annealing_schedule: linear            # Annealing schedule: "linear" or "exponential" (geometric).
-  base_cov: identity                    # Either "identity", "empirical", or "target" (for debugging).
-  adapt_interval: 50                    # Interval for adapting the jump scale.
-  cov_update_interval: 50               # Interval for updating the proposal covariance.
-  epsilon: 1e-6                         # Small constant for numerical stability.
-  burn_in_fraction: 0.3                 # Fraction of samples to discard as burn-in.
-  
+  nstd: 10.0                            # Number of standard deviations for ellipsoid bounding box.
+  cov_scale: 6.0                        # Covariance scaling factor for ellipsoid sampling.
 
 iterative:
   n_iterations: 10                      # Total number of iterative cycles.
   retention:
-    base_probability: 1.0               # Retention probability for samples with age <= 1.
-    decay_rate: 0.1                     # Linear decay rate per iteration beyond age 1.
-    min_probability: 0.5                # Minimum retention probability.
-    control_coef: 0                     # Coefficient to control influence of birth iteration (set to 0 for no dynamic decay rate).
+    base_probability: 1.0               # Retention probability for samples with age ≤ 1.
+    decay_rate: 0.1                     # Linear decay per iteration beyond age 1.
+    min_probability: 0.5                # Minimum retention probability at large ages.
+    control_coef: 0                     # Coefficient controlling birth‐age influence (0 → static decay).
+
+sampling:
+  method: polychord                          # Sampling method: "mcmc" or "polychord".
+
+  mcmc:                                 # Settings for the MCMC sampler
+    n_chains: 8                         # Number of parallel chains.
+    r_start: inf                        # Start adapting when max(R-1) < r_start.
+    r_stop: 0.4                         # Stop adapting when max(R-1) < r_stop.
+    r_converged: 0.01                   # Convergence criterion for max(R-1).
+    max_steps: 1000000                  # Max iterations if convergence isn’t reached.
+    initial_temperature: 10.0           # Temperature for the initial MCMC run.
+    final_temperature: 10.0             # Temperature for the final iteration.
+    annealing_schedule: linear          # “linear” or “exponential” temperature schedule.
+    base_cov: target                    # Either "target", "identity", or "empirical".
+    adapt_interval: 50                  # Interval (in steps) to adapt jump scale.
+    cov_update_interval: 5000           # Interval to update proposal covariance.
+    epsilon: 1e-8                       # Small constant for numerical stability.
+
+  polychord:                            # Settings for the PolyChord sampler
+    nlive: 500                          # Number of live points.
+    num_repeats: 1                      # Slice‐sampling repeats per iteration.
+    precision_criterion: 0.01           # Evidence precision tolerance.
+    feedback: 1                         # Verbosity level of output.
+    output_dir: polychord_output        # Directory to store PolyChord outputs.
+    mpi: True                           # Enable MPI‐based parallelization.
+    nprocs: 8                          # Number of MPI processes/ranks.
 
 paths:
   trained_models: trained_models        # Directory for saving trained models.
   iterative_data: iterative_data        # Directory for storing iterative data.
   mcmc_chains: mcmc/chains              # Directory for saving MCMC chains.
-  mcmc_bestfit: mcmc/bestfit            # Directory for saving best-fit samples.
+  mcmc_bestfit: mcmc/bestfit            # Directory for saving best‐fit samples.
